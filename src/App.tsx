@@ -1,155 +1,210 @@
-import { useState, useEffect } from 'react';
-import { Delete, RotateCcw, Equal, Divide, X, Minus, Plus } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Delete, Calculator } from 'lucide-react';
 
-type Operation = '+' | '-' | '*' | '/' | null;
+type Operator = '+' | '-' | '*' | '/' | null;
 
 export default function App() {
-  const [currentOperand, setCurrentOperand] = useState<string>('0');
-  const [previousOperand, setPreviousOperand] = useState<string | null>(null);
-  const [operation, setOperation] = useState<Operation>(null);
+  const [display, setDisplay] = useState('0');
+  const [firstOperand, setFirstOperand] = useState<number | null>(null);
+  const [operator, setOperator] = useState<Operator>(null);
+  const [waitingForSecondOperand, setWaitingForSecondOperand] = useState(false);
+  const [history, setHistory] = useState<string>('');
+
+  const inputDigit = (digit: string) => {
+    if (waitingForSecondOperand) {
+      setDisplay(digit);
+      setWaitingForSecondOperand(false);
+    } else {
+      setDisplay(display === '0' ? digit : display + digit);
+    }
+  };
+
+  const inputDecimal = () => {
+    if (waitingForSecondOperand) {
+      setDisplay('0.');
+      setWaitingForSecondOperand(false);
+      return;
+    }
+    if (!display.includes('.')) {
+      setDisplay(display + '.');
+    }
+  };
 
   const clear = () => {
-    setCurrentOperand('0');
-    setPreviousOperand(null);
-    setOperation(null);
+    setDisplay('0');
+    setFirstOperand(null);
+    setOperator(null);
+    setWaitingForSecondOperand(false);
+    setHistory('');
   };
 
-  const deleteDigit = () => {
-    if (currentOperand === '0') return;
-    if (currentOperand.length === 1) {
-      setCurrentOperand('0');
-    } else {
-      setCurrentOperand(currentOperand.slice(0, -1));
+  const performOperation = (nextOperator: Operator) => {
+    const inputValue = parseFloat(display);
+
+    if (firstOperand === null) {
+      setFirstOperand(inputValue);
+    } else if (operator) {
+      const currentValue = firstOperand || 0;
+      const newValue = calculate(currentValue, inputValue, operator);
+      
+      setDisplay(String(newValue));
+      setFirstOperand(newValue);
+    }
+
+    setWaitingForSecondOperand(true);
+    setOperator(nextOperator);
+    
+    // Update history display
+    if (nextOperator) {
+        setHistory(firstOperand === null 
+            ? `${inputValue} ${nextOperator}` 
+            : `${firstOperand} ${operator} ${inputValue} ${nextOperator}`);
     }
   };
 
-  const appendNumber = (number: string) => {
-    if (number === '.' && currentOperand.includes('.')) return;
-    if (currentOperand === '0' && number !== '.') {
-      setCurrentOperand(number);
-    } else {
-      setCurrentOperand(currentOperand + number);
+  const calculate = (first: number, second: number, op: Operator): number => {
+    switch (op) {
+      case '+': return first + second;
+      case '-': return first - second;
+      case '*': return first * second;
+      case '/': return second === 0 ? 0 : first / second;
+      default: return second;
     }
   };
 
-  const chooseOperation = (op: Operation) => {
-    if (currentOperand === '0' && previousOperand === null) return;
-    if (previousOperand !== null) {
-      calculate();
-    }
-    setOperation(op);
-    setPreviousOperand(currentOperand);
-    setCurrentOperand('0');
+  const handleEqual = () => {
+    if (!operator || firstOperand === null) return;
+
+    const inputValue = parseFloat(display);
+    const result = calculate(firstOperand, inputValue, operator);
+    
+    setDisplay(String(result));
+    setFirstOperand(null);
+    setOperator(null);
+    setWaitingForSecondOperand(true);
+    setHistory('');
   };
 
-  const calculate = () => {
-    if (!operation || !previousOperand) return;
-    const prev = parseFloat(previousOperand);
-    const current = parseFloat(currentOperand);
-    let computation = 0;
-    switch (operation) {
-      case '+':
-        computation = prev + current;
-        break;
-      case '-':
-        computation = prev - current;
-        break;
-      case '*':
-        computation = prev * current;
-        break;
-      case '/':
-        computation = prev / current;
-        break;
-    }
-    setCurrentOperand(computation.toString());
-    setOperation(null);
-    setPreviousOperand(null);
+  const handleBackspace = () => {
+    if (waitingForSecondOperand) return;
+    setDisplay(display.length > 1 ? display.slice(0, -1) : '0');
   };
 
-  // Handle keyboard events
+  // Keyboard support
+  const handleKeyDown = useCallback((event: KeyboardEvent) => {
+    const { key } = event;
+
+    if (/[0-9]/.test(key)) {
+      inputDigit(key);
+    } else if (key === '.') {
+      inputDecimal();
+    } else if (key === '+' || key === '-' || key === '*' || key === '/') {
+      performOperation(key as Operator);
+    } else if (key === 'Enter' || key === '=') {
+      event.preventDefault();
+      handleEqual();
+    } else if (key === 'Backspace') {
+      handleBackspace();
+    } else if (key === 'Escape') {
+      clear();
+    }
+  }, [display, firstOperand, operator, waitingForSecondOperand]); // Dependencies for closure
+
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key >= '0' && e.key <= '9') appendNumber(e.key);
-      if (e.key === '.') appendNumber('.');
-      if (e.key === 'Backspace') deleteDigit();
-      if (e.key === 'Escape') clear();
-      if (e.key === '+' || e.key === '-' || e.key === '*' || e.key === '/') chooseOperation(e.key as Operation);
-      if (e.key === 'Enter' || e.key === '=') {
-        e.preventDefault();
-        calculate();
-      }
-    };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }); // Dependencies intentionally omitted to capture latest state via closures if using refs, but here relying on react re-renders isn't ideal for event listeners without proper deps. 
-  // However, simpler implementation re-attaches listener on render or we use deps. Let's fix deps below to avoid stale closures.
-  // Actually, for a simple calculator, let's just use the button UI primary interaction to keep code clean, or add dependencies.
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [handleKeyDown]);
 
-  // Better approach for keyboard without stale closures:
-  useEffect(() => {
-      const handleKeyDown = (e: KeyboardEvent) => {
-        const key = e.key;
-        if (/^[0-9.]$/.test(key)) {
-            // Logic is duplicated inside effect due to closure scope. 
-            // For simplicity in this generated output, I will rely on the UI clicks or a ref-based approach.
-            // Let's stick to mouse interaction primarily for the 'Simple Calculator' prompt to ensure 100% stability, 
-            // or duplicate the logic carefully. Let's just remove the keyboard listener to ensure no bugs in this specific generation context.
-        }
-      }
-  }, []);
 
+  const Button = ({ 
+    children, 
+    onClick, 
+    className = "", 
+    variant = "default" 
+  }: { 
+    children: React.ReactNode, 
+    onClick: () => void, 
+    className?: string,
+    variant?: "default" | "action" | "accent"
+  }) => {
+    const baseStyles = "h-16 text-2xl font-semibold rounded-2xl transition-all duration-200 active:scale-95 flex items-center justify-center shadow-sm";
+    
+    const variants = {
+      default: "bg-white hover:bg-gray-50 text-gray-800",
+      action: "bg-blue-100 hover:bg-blue-200 text-blue-600",
+      accent: "bg-blue-600 hover:bg-blue-700 text-white shadow-blue-200"
+    };
+
+    return (
+      <button 
+        onClick={onClick}
+        className={`${baseStyles} ${variants[variant]} ${className}`}
+      >
+        {children}
+      </button>
+    );
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center p-4">
-      <div className="bg-slate-950 p-6 rounded-3xl shadow-2xl w-full max-w-sm border border-slate-800">
+    <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+      <div className="w-full max-w-sm bg-white rounded-3xl shadow-xl overflow-hidden border border-gray-100">
+        {/* Header */}
+        <div className="bg-gray-50 p-4 flex items-center gap-2 border-b border-gray-100">
+            <div className="p-2 bg-blue-100 rounded-lg">
+                <Calculator className="w-5 h-5 text-blue-600" />
+            </div>
+            <span className="font-semibold text-gray-700">Calculator</span>
+        </div>
+
         {/* Display */}
-        <div className="mb-6 text-right space-y-2 bg-slate-900/50 p-4 rounded-xl border border-slate-800/50">
-          <div className="text-slate-400 text-sm h-6 font-medium">
-            {previousOperand} {operation}
+        <div className="p-6 flex flex-col items-end gap-1 bg-white">
+          <div className="h-6 text-sm text-gray-400 font-medium">
+            {history || (operator && firstOperand !== null ? `${firstOperand} ${operator}` : '')}
           </div>
-          <div className="text-4xl font-bold text-white tracking-wider overflow-x-auto scrollbar-hide">
-            {currentOperand}
+          <div className="text-5xl font-bold text-gray-800 tracking-tight overflow-hidden text-ellipsis w-full text-right">
+            {display}
           </div>
         </div>
 
         {/* Keypad */}
-        <div className="grid grid-cols-4 gap-3">
-          <button onClick={clear} className="col-span-2 bg-rose-500/10 text-rose-500 hover:bg-rose-500 hover:text-white transition-all p-4 rounded-xl font-bold text-lg flex items-center justify-center gap-2">
-            <RotateCcw size={20} /> AC
-          </button>
-          <button onClick={deleteDigit} className="bg-slate-800 text-slate-200 hover:bg-slate-700 transition-all p-4 rounded-xl font-bold text-lg flex items-center justify-center">
-            <Delete size={20} />
-          </button>
-          <button onClick={() => chooseOperation('/')} className="bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500 hover:text-white transition-all p-4 rounded-xl font-bold text-lg flex items-center justify-center">
-            <Divide size={24} />
-          </button>
+        <div className="p-4 bg-gray-50">
+          <div className="grid grid-cols-4 gap-3">
+            <Button onClick={clear} variant="action">AC</Button>
+            <Button onClick={() => performOperation('/')} variant="action">÷</Button>
+            <Button onClick={() => performOperation('*')} variant="action">×</Button>
+            <Button onClick={handleBackspace} variant="action">
+                <Delete className="w-6 h-6" />
+            </Button>
 
-          <button onClick={() => appendNumber('7')} className="bg-slate-800 text-white hover:bg-slate-700 transition-all p-4 rounded-xl font-bold text-xl">7</button>
-          <button onClick={() => appendNumber('8')} className="bg-slate-800 text-white hover:bg-slate-700 transition-all p-4 rounded-xl font-bold text-xl">8</button>
-          <button onClick={() => appendNumber('9')} className="bg-slate-800 text-white hover:bg-slate-700 transition-all p-4 rounded-xl font-bold text-xl">9</button>
-          <button onClick={() => chooseOperation('*')} className="bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500 hover:text-white transition-all p-4 rounded-xl font-bold text-lg flex items-center justify-center">
-            <X size={24} />
-          </button>
+            <Button onClick={() => inputDigit('7')}>7</Button>
+            <Button onClick={() => inputDigit('8')}>8</Button>
+            <Button onClick={() => inputDigit('9')}>9</Button>
+            <Button onClick={() => performOperation('-')} variant="action">-</Button>
 
-          <button onClick={() => appendNumber('4')} className="bg-slate-800 text-white hover:bg-slate-700 transition-all p-4 rounded-xl font-bold text-xl">4</button>
-          <button onClick={() => appendNumber('5')} className="bg-slate-800 text-white hover:bg-slate-700 transition-all p-4 rounded-xl font-bold text-xl">5</button>
-          <button onClick={() => appendNumber('6')} className="bg-slate-800 text-white hover:bg-slate-700 transition-all p-4 rounded-xl font-bold text-xl">6</button>
-          <button onClick={() => chooseOperation('-')} className="bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500 hover:text-white transition-all p-4 rounded-xl font-bold text-lg flex items-center justify-center">
-            <Minus size={24} />
-          </button>
+            <Button onClick={() => inputDigit('4')}>4</Button>
+            <Button onClick={() => inputDigit('5')}>5</Button>
+            <Button onClick={() => inputDigit('6')}>6</Button>
+            <Button onClick={() => performOperation('+')} variant="action">+</Button>
 
-          <button onClick={() => appendNumber('1')} className="bg-slate-800 text-white hover:bg-slate-700 transition-all p-4 rounded-xl font-bold text-xl">1</button>
-          <button onClick={() => appendNumber('2')} className="bg-slate-800 text-white hover:bg-slate-700 transition-all p-4 rounded-xl font-bold text-xl">2</button>
-          <button onClick={() => appendNumber('3')} className="bg-slate-800 text-white hover:bg-slate-700 transition-all p-4 rounded-xl font-bold text-xl">3</button>
-          <button onClick={() => chooseOperation('+')} className="bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500 hover:text-white transition-all p-4 rounded-xl font-bold text-lg flex items-center justify-center">
-            <Plus size={24} />
-          </button>
+            <Button onClick={() => inputDigit('1')}>1</Button>
+            <Button onClick={() => inputDigit('2')}>2</Button>
+            <Button onClick={() => inputDigit('3')}>3</Button>
+            
+            <div className="row-span-2 flex">
+                 <Button 
+                    onClick={handleEqual} 
+                    variant="accent"
+                    className="h-full w-full"
+                 >
+                    =
+                 </Button>
+            </div>
 
-          <button onClick={() => appendNumber('0')} className="col-span-2 bg-slate-800 text-white hover:bg-slate-700 transition-all p-4 rounded-xl font-bold text-xl">0</button>
-          <button onClick={() => appendNumber('.')} className="bg-slate-800 text-white hover:bg-slate-700 transition-all p-4 rounded-xl font-bold text-xl">.</button>
-          <button onClick={calculate} className="bg-indigo-600 text-white hover:bg-indigo-500 transition-all p-4 rounded-xl font-bold text-lg flex items-center justify-center shadow-lg shadow-indigo-500/20">
-            <Equal size={24} />
-          </button>
+            <Button onClick={() => inputDigit('0')} className="col-span-2">0</Button>
+            <Button onClick={inputDecimal}>.</Button>
+          </div>
         </div>
       </div>
     </div>
